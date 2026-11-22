@@ -3,25 +3,28 @@
 // /output/<id>/stdout.bin and /output/<id>/exit.txt. No deps, no network.
 const fs=require("node:fs"),path=require("node:path");
 const IN=process.env.MAKEFUN_INPUT_DIR||"/input",OUT=process.env.MAKEFUN_OUTPUT_DIR||"/output";
+// ISA v1 resource limits: output bytes, interpreter steps, data-stack depth,
+// call-stack depth, and memory cells (addresses 0..MEM_SIZE-1).
+const MAX_OUTPUT=65536,MAX_STEPS=1000000,MAX_STACK=256,MAX_CALLS=64,MEM_SIZE=256;
 // immediate length, and [pops,pushes] on the data stack, per opcode
 const IL={1:1,2:4,48:2,49:2,50:2,51:2};
 const NP={0:[0,0],1:[0,1],2:[0,1],3:[1,0],4:[1,2],5:[2,2],6:[2,3],7:[3,3],16:[2,1],17:[2,1],18:[2,1],19:[2,1],20:[2,1],21:[2,1],22:[2,1],23:[1,1],24:[2,1],25:[2,1],26:[2,1],27:[1,1],28:[2,1],29:[2,1],30:[2,1],32:[2,1],33:[2,1],34:[2,1],48:[0,0],49:[1,0],50:[1,0],51:[0,0],52:[0,0],64:[1,1],65:[2,0],80:[1,0],81:[1,0],82:[0,1],83:[1,0]};
 function run(p, inp) {
-  const s=[], c=[], m=new Int32Array(256), o=[];
+  const s=[], c=[], m=new Int32Array(MEM_SIZE), o=[];
   let ol=0, pc=0, steps=0, ip=0;
   const T=(k)=>{const e=new Error("t"+k); e.k=k; throw e;};
-  const w=(b)=>{ if(ol+b.length>65536) T(11); o.push(b); ol+=b.length; };
+  const w=(b)=>{ if(ol+b.length>MAX_OUTPUT) T(11); o.push(b); ol+=b.length; };
   const s16=(i)=>{let v=p[i]|(p[i+1]<<8); return v>=32768?v-65536:v;};
   try {
     for(;;) {
-      if(steps>=1000000) T(10);
+      if(steps>=MAX_STEPS) T(10);
       if(pc<0||pc>=p.length) T(9);
       const op=p[pc], nd=NP[op];
       if(nd===undefined) T(5);
       const il=IL[op]||0;
       if(pc+1+il>p.length) T(9);
       if(s.length<nd[0]) T(2);
-      if(s.length-nd[0]+nd[1]>256) T(3);
+      if(s.length-nd[0]+nd[1]>MAX_STACK) T(3);
       steps++;
       const nx=pc+1+il;
       let a,b;
@@ -55,10 +58,10 @@ function run(p, inp) {
         case 48: pc=nx+s16(pc+1); break;
         case 49: pc=s.pop()===0?nx+s16(pc+1):nx; break;
         case 50: pc=s.pop()!==0?nx+s16(pc+1):nx; break;
-        case 51: if(c.length>=64) T(7); c.push(nx); pc=p[pc+1]|(p[pc+2]<<8); break;
+        case 51: if(c.length>=MAX_CALLS) T(7); c.push(nx); pc=p[pc+1]|(p[pc+2]<<8); break;
         case 52: if(!c.length) T(8); pc=c.pop(); break;
-        case 64: a=s.pop(); if(a<0||a>255) T(6); s.push(m[a]); pc=nx; break;
-        case 65: a=s.pop(); b=s.pop(); if(a<0||a>255) T(6); m[a]=b; pc=nx; break;
+        case 64: a=s.pop(); if(a<0||a>=MEM_SIZE) T(6); s.push(m[a]); pc=nx; break;
+        case 65: a=s.pop(); b=s.pop(); if(a<0||a>=MEM_SIZE) T(6); m[a]=b; pc=nx; break;
         case 80: w(Buffer.from(String(s.pop()),"ascii")); pc=nx; break;
         case 81: w(Buffer.from([s.pop()&255])); pc=nx; break;
         case 82: s.push(ip<inp.length?inp[ip++]:-1); pc=nx; break;
